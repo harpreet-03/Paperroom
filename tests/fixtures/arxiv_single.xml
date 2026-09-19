@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>http://arxiv.org/abs/2401.12345v2</id>
+    <updated>2024-02-01T00:00:00Z</updated>
+    <published>2024-01-15T00:00:00Z</published>
+    <title>KV-Cache Compression for Efficient LLM Inference</title>
+    <summary>We study techniques for compressing the key-value cache in
+    transformer decoders to reduce memory footprint during inference.</summary>
+    <author><name>Jane Doe</name></author>
+    <author><name>John Smith</name></author>
+    <link href="http://arxiv.org/abs/2401.12345v2" rel="alternate" type="text/html"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2401.12345v2" rel="related" type="application/pdf"/>
+    <category term="cs.CL"/>
+    <category term="cs.LG"/>
+  </entry>
+</feed>
