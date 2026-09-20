@@ -139,38 +139,65 @@ $ python -m src.cli --query "KV-cache compression for LLMs"
 Running pipeline for: 'KV-cache compression for LLMs'
 
 ==============================================================================
-KV-Cache Compression Survey for LLMs
-B. Cee
-arXiv:2401.99999  (2024-03-01)   http://arxiv.org/abs/2401.99999v1
+GRKV: Global Regression for Training-Free KV Cache Compression in Long-Context LLMs
+Junjie Peng, You Wu, Haoyi Wu, Jialong Han, Xiaohua Xie, Kewei Tu, Jianhuang Lai · arXiv:2605.31105 · 2026-05-29
+arXiv:2605.31105  2026-05-29   https://arxiv.org/abs/2605.31105v2
 ==============================================================================
 
 WHY IT MATTERS
-This paper surveys techniques for shrinking the key-value cache used during
-transformer inference, which is the main memory bottleneck for serving long
-contexts, and organizes existing methods by where in the pipeline they act.
+GRKV introduces a training‑free, globally optimized KV‑cache merging technique for long‑context LLMs that directly minimizes the attention‑output gap between a compressed cache and the full cache, addressing the over‑merging and information loss seen in span‑based eviction methods, and demonstrates overall performance gains on LongBench and RULER with modest runtime overhead.
 
 PROBLEM STATEMENT
-KV-cache memory grows linearly with sequence length and batch size, limiting
-achievable context length and batch throughput on fixed hardware.
+Modern span‑based KV‑cache eviction concentrates merges onto a few boundary tokens, causing imbalanced merging, over‑merging, and loss of information in long‑context LLMs.
 
-METHOD
-  - Categorizes approaches into quantization, token eviction, and low-rank
-    projection of cached keys/values
-  - Benchmarks each category on a shared long-context evaluation suite
+Method (GRKV – Global Regression for KV‑Cache)
 
-KEY RESULTS
-  - Quantization to 4-bit recovers >95% of full-precision accuracy at ~4x
-    memory reduction on the surveyed benchmarks
-  - Token-eviction methods trade a larger accuracy drop for the largest
-    memory savings at very long contexts
+GRKV is a training‑free KV‑cache merging technique that treats all retained tokens as merge carriers instead of focusing only on a few span‑boundary tokens (the “boundary carriers” that previous heuristics over‑load).
+The method aligns the compressed cache with the full cache by directly minimizing the discrepancy in attention outputs. This is done with a ridge‑regression‑based merge step that uses the full cache as the information source and distributes the information from evicted tokens across the retained tokens.
 
-LIMITATIONS
-  - Survey coverage is limited to methods published before the cutoff date
-  - Benchmarks are text-only; multimodal KV-cache behavior is not covered
+Key algorithmic components (from the “methods” excerpt):
 
-SUGGESTED FOLLOW-UP QUESTIONS
-  - Which quantization scheme has the best accuracy/memory tradeoff?
-  - How do these methods interact with speculative decoding?
+Key‑step objective – the retained keys (K_{\text{Ret}}) are updated by minimizing a regularized loss that includes the attention loss on a surrogate window and a ridge term:
+
+[ \min_{K_{\text{Ret}}}; \mathcal{L}K = \mathcal{L}{\text{win}} + \lambda_k |K_{\text{Ret}}-K^{0}_{\text{Ret}}|_F^2 . ]
+
+Linearized dual solution – because the loss is non‑linear (the soft‑max appears inside), GRKV linearizes the attention output around the current (K_{\text{Ret}}) and solves the resulting ridge problem in the dual domain. The solution is
+
+[ \operatorname{vec}(K^{*}{\text{Ret}})=\operatorname{vec}(K^{0}{\text{Ret}})+J^{\top}\alpha, ]
+
+where (\alpha = (JJ^{\top}+\lambda_k I_Y)^{-1}(e+Jg)). The dual system has dimension (m d) (with (m\ll c)), which is far smaller than the primal key space (c d).
+
+Fixed tokens – while most retained tokens are updated, a small set is kept immutable: sink tokens, surrogate‑window query tokens, and the top (\beta = 10%) tokens by attention score (the “boundary carriers”).
+
+Training‑free – GRKV does not require any gradient‑based fine‑tuning of the language model; it only performs the regression step at inference time.
+
+Key Results
+
+Metric / Dataset	GRKV (full)	SnapKV (baseline)	D2O (comparison)
+LongBench (average)	34.58	34.40 (SnapKV)	–
+RULER (average)	29.09	28.40 (SnapKV)	–
+TTFT overhead (relative to SnapKV)	+0.8 % – 2.6 %	–	–
+Memory‑fixed improvement (at iso‑memory)	+0.62 points over SnapKV	–	–
+Interpretation (from the “method” excerpt):
+
+GRKV matches or slightly exceeds the performance of SnapKV and D2O on the long‑context benchmark LongBench while adding only a modest 0.8–2.6 % increase in time‑to‑first‑token (TTFT).
+The regression overhead is dominated by the key‑update step (≈ 84.6 % of the extra regression time) and within that, the conjugate‑gradient (CG) solve accounts for 93–94 % of the key‑update cost.
+When the compute budget allows, the key‑update provides an extra 0.18 points on LongBench and 0.69 points on RULER compared with the lightweight variant GRV.
+Limitations (as reported in the excerpts)
+
+Computation overhead – although the regression is “training‑free,” it introduces extra work. The key‑update step (linearization + CG) consumes the bulk of the added latency (≈ 84 % of the regression time) and may become a bottleneck when the KV cache is large (e.g., 32 K tokens).
+
+Dependence on regression solve – the quality of the merge hinges on solving the ridge‑regression problem accurately; the CG solver must converge, which can be sensitive to the choice of regularization ((\lambda_k)) and to the surrogate window size (m).
+
+Partial immutability – GRKV deliberately leaves a subset of retained tokens untouched (sink tokens, surrogate‑window queries, top‑β tokens). While this protects important carriers, it also limits the degree of global adaptation and may leave some useful information unmerged.
+
+Compatibility constraints – the method was evaluated with FlashAttention‑2 for efficiency, but one variant (AsymKV) could not use FlashAttention‑2, indicating that not all existing KV‑cache pipelines may immediately benefit from the same kernel optimizations.
+
+Scope of evaluation – the reported gains are measured on LongBench and RULER; the paper does not provide results on other domains (e.g., code generation, multilingual tasks) within the provided excerpts, so the generality of the improvement remains to be verified.
+
+In summary, GRKV introduces a principled, global regression‑based merging step that spreads information from evicted tokens across all retained tokens, yielding modest but consistent accuracy gains with only a small TTFT penalty. Its main trade‑off is the extra regression computation required for the key update, and the method still relies on a fixed subset of “protected” carriers, which may limit its flexibility in some scenarios. (Citations: [introduction] for motivation and contrast with prior heuristics; [methods] for algorithmic formulation; [method] for performance numbers and overhead; [experiments] for experimental setup.)
+
+
 ==============================================================================
 
 Ask questions about this paper (blank line or 'exit' to quit).
