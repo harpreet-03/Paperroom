@@ -1,5 +1,7 @@
 # Autonomous arXiv Paper Digest & QA Agent
 
+**Live demo:** _(add your deployed Streamlit Community Cloud link here)_
+
 An agent that takes a research **topic** or a specific **arXiv id/URL**, retrieves
 the paper via the official arXiv API, downloads and parses the PDF, builds a
 local (TF-IDF) vector index over it, produces a structured **executive
@@ -18,7 +20,7 @@ The pipeline is implemented as an **explicit stateful graph** (`src/graph.py`
 — ~70 lines, no external orchestration framework) of nodes that read/write a
 single shared `AgentState` dataclass (`src/state.py`). Using a hand-rolled
 graph instead of e.g. LangGraph was a deliberate choice for a project this
-size — see [Design Decisions](#5-design-decisions--tradeoffs).
+size — see [Design Decisions](#6-design-decisions--tradeoffs).
 
 ```
  query_understanding
@@ -187,9 +189,9 @@ question.
 
 ## 4. Optional UI
 
-`app.py` is a thin Streamlit UI over the same `src/pipeline.py` and
-`src/nodes/qa.py` used by the CLI — no changes to the agent itself, purely
-a presentation layer.
+`app.py` ("Paperroom") is a Streamlit workspace over the same
+`src/pipeline.py` and `src/nodes/qa.py` used by the CLI — no changes to the
+agent itself, purely a presentation layer.
 
 ```bash
 pip install -r requirements.txt   # now includes streamlit
@@ -197,13 +199,26 @@ streamlit run app.py
 ```
 
 It opens in your browser at `http://localhost:8501` with:
-- a query box (topic / arXiv id / URL) and a "Run" button that streams the
-  same node-by-node progress the CLI's `--verbose` flag shows
-- the briefing rendered as headers/bullets, with a warning banner if the
-  PDF fell back to the abstract
-- clickable "suggested follow-up questions" plus a normal chat box for QA
-- a sidebar to check which LLM provider/key is active and to resume a past
-  session by arXiv id (same `sessions/*.json` files the CLI writes)
+- a query box (topic / arXiv id / URL) and a "Research" button that streams
+  live progress through the same graph nodes the CLI's `--verbose` flag shows
+- an **Overview** tab: arXiv category chips, a "why it matters" and problem
+  card, and Method/Key results/Limitations rendered as color-accented cards
+  (blue/green/amber) rather than plain bullets, plus a "try asking" shortcut
+  straight into Chat
+- a **Chat** tab: grounded RAG conversation with clickable suggested
+  questions (including a guaranteed "summarize this paper" chip) and an
+  empty-state placeholder before the first message
+- a **Source** tab: the parsed section text the RAG index was actually built
+  from, for sanity-checking what the agent could see
+- a sidebar with dark-mode toggle, which LLM provider/key is active, and a
+  list of recent papers to reopen (same `sessions/*.json` files the CLI
+  writes) without re-running retrieval/parsing/embedding
+
+The Chat tab's grounding has two paths, matching the fix described in
+[Design Decisions](#6-design-decisions--tradeoffs): broad questions
+("summarize this", "what's it about") answer from the already-generated
+briefing; specific questions go through normal chunk retrieval, with the
+similarity-threshold refusal as a guardrail against hallucination.
 
 > Note: the assessment brief lists "a frontend/UI beyond a basic CLI" as
 > **out of scope** for grading. `app.py` is included as a convenience for
@@ -216,7 +231,7 @@ It opens in your browser at `http://localhost:8501` with:
 python -m pytest tests/ -v
 ```
 
-21 tests, fully offline (arXiv responses, PDF files, and LLM calls are all
+23 tests, fully offline (arXiv responses, PDF files, and LLM calls are all
 mocked/synthesized — no network needed to run the suite). Coverage
 includes the two failure cases called out in §5 of the brief:
 
@@ -226,6 +241,9 @@ includes the two failure cases called out in §5 of the brief:
   `test_parse_corrupted_file_path`, `test_pdf_download_failure_falls_back_to_abstract_and_still_produces_briefing`
 - **Grounded QA / refusal to hallucinate**: `test_qa_grounded_answer_uses_llm`,
   `test_qa_refuses_when_similarity_too_low`
+- **Broad/meta questions answer from the briefing, not retrieval**:
+  `test_qa_meta_summary_question_uses_briefing_not_retrieval`,
+  `test_qa_meta_question_detection_variants`
 
 ## 6. Design Decisions & Tradeoffs
 
@@ -266,6 +284,16 @@ excerpts and say so if they're insufficient, and to cite which section it
 used. Layer 1 is deterministic and free; layer 2 is a soft guardrail on top
 of it — belt and suspenders rather than relying on either alone.
 
+**Broad/meta questions bypass retrieval entirely.** Questions like
+"summarize this" or "what's it about" share almost no vocabulary with any
+single passage, so TF-IDF systematically under-scores them and they used
+to trip the similarity gate and get refused even though the paper
+obviously has an answer. `src/nodes/qa.py` now regex-detects this question
+shape and answers from `state.briefing` instead — still grounded (the
+briefing itself came from retrieved context during `summarize`), just via
+a context source suited to a broad question instead of forcing a
+narrow-retrieval tool to answer a wide-angle one.
+
 **Section splitting is a heuristic, not a real layout parser.** Flattened
 PDF text has no reliable structure markers once headers/body are on equal
 footing, so `pdf_parser._split_sections` matches short lines against a
@@ -286,6 +314,9 @@ headers structurally instead of by string matching.
   holds the full ranked list.
 - `GROUNDING_THRESHOLD` is a hand-picked constant, not calibrated against a
   labeled QA set.
+- Meta-question detection (`_is_meta_summary_question`) is a fixed regex
+  list, not a learned classifier — an unusual phrasing of "summarize this"
+  could still slip through to the retrieval path and get refused.
 
 ## 7. Out of scope (per the brief)
 
@@ -295,7 +326,8 @@ non-arXiv sources, no fine-tuning.
 ## 8. Project layout
 
 ```
-app.py                  optional Streamlit UI (thin layer over src/pipeline.py + src/nodes/qa.py)
+app.py                  optional Streamlit UI ("Paperroom" — layer over src/pipeline.py + src/nodes/qa.py)
+.streamlit/config.toml  Streamlit theme for app.py
 src/
   state.py              AgentState / PaperMeta / ParsedPaper / Chunk / Briefing
   graph.py               generic node/edge state-graph engine
@@ -304,10 +336,10 @@ src/
   pdf_parser.py            PDF download + text/section extraction
   chunking.py               paragraph-aware chunker with overlap
   cli.py                     CLI entry point + REPL
-  nodes/                     one module per graph node
+  nodes/                     one module per graph node (qa.py also handles meta-question routing)
   llm/                        pluggable LLM providers (groq/gemini/ollama/stub)
   vectorstore/                  local TF-IDF vector store
-tests/                    21 offline unit tests (mocked network/LLM)
+tests/                    23 offline unit tests (mocked network/LLM)
 sessions/                 saved QA sessions (git-ignored)
 data/                     downloaded PDFs + persisted vector stores (git-ignored)
 ```
