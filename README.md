@@ -2,6 +2,8 @@
 
 **Live demo:** https://harpreet-03-paperroom-app-pwxgus.streamlit.app
 
+**Video Recording:** https://drive.google.com/file/d/1tqPz5uBHYXc5npimvmPQHHlpCprMC-SC/view?usp=sharing
+
 An agent that takes a research **topic** or a specific **arXiv id/URL**, retrieves
 the paper via the official arXiv API, downloads and parses the PDF, builds a
 local (TF-IDF) vector index over it, produces a structured **executive
