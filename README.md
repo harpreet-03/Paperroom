@@ -1,6 +1,6 @@
 # Autonomous arXiv Paper Digest & QA Agent
 
-**Live demo:** _(add your deployed Streamlit Community Cloud link here)_
+**Live demo:** https://harpreet-03-paperroom-app-pwxgus.streamlit.app
 
 An agent that takes a research **topic** or a specific **arXiv id/URL**, retrieves
 the paper via the official arXiv API, downloads and parses the PDF, builds a
